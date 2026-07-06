@@ -13,20 +13,30 @@ cask "convoy" do
   app "Convoy.app"
   binary "convoy"
 
-  # This build is first-party and ad-hoc signed (not yet notarized). Strip the download
-  # quarantine so the app and CLI run without a Gatekeeper prompt (a quarantined CLI can't be
-  # "right-click-Opened" like an app can). Removed once the build is notarized.
+  # This build is first-party and ad-hoc signed (not yet notarized). An un-notarized *downloaded*
+  # binary is provenance-tracked by syspolicyd — which survives removing the com.apple.quarantine
+  # xattr — so a CLI (which can't be "right-click → Open"ed like an app) would block on a
+  # Gatekeeper decision. Re-materializing the file (fresh inode) clears that provenance so `convoy`
+  # runs immediately. All of this becomes unnecessary once the build is notarized.
   postflight do
-    ["#{appdir}/Convoy.app", "#{staged_path}/convoy"].each do |path|
-      system_command "/usr/bin/xattr",
-                     args: ["-dr", "com.apple.quarantine", path],
-                     must_succeed: false
+    require "fileutils"
+    bin = staged_path/"convoy"
+    if File.exist?(bin)
+      tmp = "#{bin}.rematerialized"
+      FileUtils.cp(bin, tmp)
+      FileUtils.mv(tmp, bin, force: true)
+      FileUtils.chmod(0755, bin)
     end
+    # The app uses the standard right-click → Open flow; drop its quarantine to smooth that.
+    system_command "/usr/bin/xattr",
+                   args: ["-dr", "com.apple.quarantine", "#{appdir}/Convoy.app"],
+                   must_succeed: false
   end
 
   caveats <<~CAVEATS
     convoy orchestrates the smalltalk (st) and pty CLIs — install those separately.
 
-    This is a demo prerelease (arm64, ad-hoc signed). A notarized, universal build is coming.
+    This is a demo prerelease (arm64, ad-hoc signed). A notarized, universal build is coming;
+    until then, the first time you launch Convoy.app, right-click it in /Applications → Open.
   CAVEATS
 end
