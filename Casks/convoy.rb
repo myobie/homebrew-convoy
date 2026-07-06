@@ -11,32 +11,31 @@ cask "convoy" do
   depends_on arch: :arm64
 
   app "Convoy.app"
-  binary "convoy"
 
-  # This build is first-party and ad-hoc signed (not yet notarized). An un-notarized *downloaded*
-  # binary is provenance-tracked by syspolicyd — which survives removing the com.apple.quarantine
-  # xattr — so a CLI (which can't be "right-click → Open"ed like an app) would block on a
-  # Gatekeeper decision. Re-materializing the file (fresh inode) clears that provenance so `convoy`
-  # runs immediately. All of this becomes unnecessary once the build is notarized.
+  # No `binary` stanza on purpose: a symlink would point at the provenance-tainted Caskroom
+  # extraction path, and this build isn't notarized yet, so Gatekeeper would block the CLI
+  # (a CLI can't be "right-click → Open"ed like an app). Instead we install the CLI as a fresh,
+  # un-quarantined copy — a new path avoids the path-level provenance, and clearing the xattr the
+  # download carries removes the file-level quarantine. Both become unnecessary after notarization.
   postflight do
     require "fileutils"
-    bin = staged_path/"convoy"
-    if File.exist?(bin)
-      tmp = "#{bin}.rematerialized"
-      FileUtils.cp(bin, tmp)
-      FileUtils.mv(tmp, bin, force: true)
-      FileUtils.chmod(0755, bin)
-    end
-    # The app uses the standard right-click → Open flow; drop its quarantine to smooth that.
+    dest = "#{HOMEBREW_PREFIX}/bin/convoy"
+    FileUtils.cp staged_path/"convoy", dest
+    FileUtils.chmod 0755, dest
+    system_command "/usr/bin/xattr", args: ["-c", dest], must_succeed: false
+    # Smooth the app's first launch too (it still uses the standard right-click → Open flow).
     system_command "/usr/bin/xattr",
                    args: ["-dr", "com.apple.quarantine", "#{appdir}/Convoy.app"],
                    must_succeed: false
   end
 
+  uninstall delete: "#{HOMEBREW_PREFIX}/bin/convoy"
+
   caveats <<~CAVEATS
     convoy orchestrates the smalltalk (st) and pty CLIs — install those separately.
 
-    This is a demo prerelease (arm64, ad-hoc signed). A notarized, universal build is coming;
-    until then, the first time you launch Convoy.app, right-click it in /Applications → Open.
+    This is a demo prerelease (arm64, ad-hoc signed). The `convoy` CLI is ready to use
+    immediately. The first time you launch Convoy.app, right-click it in /Applications → Open.
+    A notarized, universal build will remove that last step.
   CAVEATS
 end
